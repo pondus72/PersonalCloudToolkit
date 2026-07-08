@@ -176,9 +176,10 @@ To use another envelope sender:
 `manual-install` is for NAS setups where the admin user can run `sudo`, but SSH
 root login or passwordless sudo is not available.
 
-It opens one interactive SSH session with `ssh -tt`, runs `sudo sh -s`, and sends
-one root install script over stdin. You enter the SSH password and sudo password
-in your terminal. The root script uses the same guarded install flow:
+It uploads one temporary root install script under the SSH user's home directory,
+runs it with `ssh -tt` and `sudo sh`, then removes the temporary script. You enter
+the SSH password and sudo password in your terminal. The root script uses the same
+guarded install flow:
 
 1. Preflight SHA256 check
 2. Remount `/` read-write

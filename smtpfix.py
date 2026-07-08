@@ -625,14 +625,35 @@ def restore_from_backup(ssh, smtp_path, backup_path, expected_sha, label):
     )
 
 
-def run_interactive_ssh_script(args, remote_command, script):
+def base_ssh_argv(args, tty=False):
     target = "%s@%s" % (args.user, args.host) if args.user else args.host
-    argv = ["ssh", "-tt", "-p", str(args.port)]
+    argv = ["ssh"]
+    if tty:
+        argv.append("-tt")
+    argv.extend(["-p", str(args.port)])
     if args.identity:
         argv.extend(["-i", args.identity])
     for option in args.ssh_option or []:
         argv.extend(["-o", option])
-    argv.extend([target, remote_command])
+    argv.append(target)
+    return argv
+
+
+def run_manual_install_session(args, script):
+    remote_name = args.remote_script
+    upload_command = (
+        "remote_script=\"$HOME/%s\"; "
+        "umask 077; "
+        "cat > \"$remote_script\"; "
+        "chmod 700 \"$remote_script\""
+    ) % remote_name
+    run_command = (
+        "remote_script=\"$HOME/%s\"; "
+        "%s \"$remote_script\"; "
+        "status=$?; "
+        "rm -f \"$remote_script\"; "
+        "exit $status"
+    ) % (remote_name, args.root_command)
 
     script_path = None
     try:
@@ -646,7 +667,15 @@ def run_interactive_ssh_script(args, remote_command, script):
             script_path = handle.name
             handle.write(script)
         with open(script_path, "r", encoding="utf-8") as handle:
-            return subprocess.call(argv, stdin=handle)
+            upload_argv = base_ssh_argv(args)
+            upload_argv.append(upload_command)
+            upload_rc = subprocess.call(upload_argv, stdin=handle)
+        if upload_rc != 0:
+            return upload_rc
+
+        run_argv = base_ssh_argv(args, tty=True)
+        run_argv.append(run_command)
+        return subprocess.call(run_argv)
     finally:
         if script_path:
             try:
@@ -771,9 +800,10 @@ def manual_install(args):
         return 0
 
     print("Starting one-session manual install over SSH.")
+    print("The root script will be uploaded temporarily, run with sudo, and removed.")
     print("You may be asked for the SSH password and then the sudo password.")
     print("Remote root command: %s" % args.root_command)
-    return run_interactive_ssh_script(args, args.root_command, script)
+    return run_manual_install_session(args, script)
 
 
 def install(args):
@@ -967,8 +997,13 @@ def build_parser():
     )
     manual_install_parser.add_argument(
         "--root-command",
-        default="sudo sh -s",
-        help="Remote command that runs stdin as root, default: sudo sh -s",
+        default="sudo sh",
+        help="Remote command that runs the uploaded script as root, default: sudo sh",
+    )
+    manual_install_parser.add_argument(
+        "--remote-script",
+        default=".smtpfix-manual-install.sh",
+        help="Temporary script name under the SSH user's home directory",
     )
     manual_install_parser.add_argument(
         "--print-script",
