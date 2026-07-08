@@ -10,6 +10,9 @@ from pathlib import Path
 MANIFEST = Path(__file__).with_name("manifest.json")
 DEFAULT_SMTP = "/usr/lib/python2.7/site-packages/sendmail/mailer/smtp.py"
 DEFAULT_CONFIG = "/etc/sendmail/user_config.json"
+DEFAULT_SENDER = "personalcloud@bildesiden.com"
+DEFAULT_MOUNT_TARGET = "/"
+BACKUP_SUFFIX = ".smtpfix-original"
 
 FIRMWARE_FILES = (
     "/etc/version",
@@ -163,6 +166,140 @@ except Exception:
     pass
 '''
 
+PATCH_SCRIPT = r'''
+from __future__ import print_function
+import hashlib
+import json
+import os
+import py_compile
+import stat
+import sys
+
+SMTP_PATH = sys.argv[1]
+SENDER = sys.argv[2]
+EXPECTED_SHA = sys.argv[3]
+
+NEEDLE = b"server.sendmail(sender_address,"
+REPLACEMENT = ("server.sendmail(%s," % ("u" + json.dumps(SENDER))).encode("ascii")
+TMP_PATH = SMTP_PATH + ".smtpfix.tmp"
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def fail(label, detail):
+    print("[FAIL] %s: %s" % (label, detail))
+    raise SystemExit(1)
+
+
+def ok(label, detail):
+    print("[OK] %s: %s" % (label, detail))
+
+
+try:
+    with open(SMTP_PATH, "rb") as handle:
+        original = handle.read()
+except Exception as exc:
+    fail("Patch", "could not read %s: %s" % (SMTP_PATH, exc))
+
+actual_sha = sha256(original)
+if actual_sha != EXPECTED_SHA:
+    fail("SHA256", "refusing to patch %s" % actual_sha)
+ok("SHA256", actual_sha)
+
+count = original.count(NEEDLE)
+if count != 1:
+    fail("Patch", "expected one sendmail envelope sender call, found %s" % count)
+
+patched = original.replace(NEEDLE, REPLACEMENT, 1)
+metadata = os.stat(SMTP_PATH)
+
+try:
+    try:
+        os.unlink(TMP_PATH)
+    except OSError:
+        pass
+    with open(TMP_PATH, "wb") as handle:
+        handle.write(patched)
+    os.chmod(TMP_PATH, stat.S_IMODE(metadata.st_mode))
+    try:
+        os.chown(TMP_PATH, metadata.st_uid, metadata.st_gid)
+    except AttributeError:
+        pass
+    os.rename(TMP_PATH, SMTP_PATH)
+    py_compile.compile(SMTP_PATH, doraise=True)
+except Exception as exc:
+    fail("Patch", exc)
+
+ok("Patch", "envelope sender set to %s" % SENDER)
+ok("Patched SHA256", sha256(patched))
+'''
+
+RESTORE_SCRIPT = r'''
+from __future__ import print_function
+import hashlib
+import os
+import py_compile
+import stat
+import sys
+
+SMTP_PATH = sys.argv[1]
+BACKUP_PATH = sys.argv[2]
+EXPECTED_SHA = sys.argv[3]
+LABEL = sys.argv[4]
+TMP_PATH = SMTP_PATH + ".smtpfix.restore"
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def fail(label, detail):
+    print("[FAIL] %s: %s" % (label, detail))
+    raise SystemExit(1)
+
+
+def ok(label, detail):
+    print("[OK] %s: %s" % (label, detail))
+
+
+try:
+    with open(BACKUP_PATH, "rb") as handle:
+        original = handle.read()
+except Exception as exc:
+    fail(LABEL, "could not read backup %s: %s" % (BACKUP_PATH, exc))
+
+backup_sha = sha256(original)
+if backup_sha != EXPECTED_SHA:
+    fail(LABEL, "backup SHA256 mismatch: %s" % backup_sha)
+
+try:
+    metadata = os.stat(SMTP_PATH)
+except OSError:
+    metadata = os.stat(BACKUP_PATH)
+
+try:
+    try:
+        os.unlink(TMP_PATH)
+    except OSError:
+        pass
+    with open(TMP_PATH, "wb") as handle:
+        handle.write(original)
+    os.chmod(TMP_PATH, stat.S_IMODE(metadata.st_mode))
+    try:
+        os.chown(TMP_PATH, metadata.st_uid, metadata.st_gid)
+    except AttributeError:
+        pass
+    os.rename(TMP_PATH, SMTP_PATH)
+    py_compile.compile(SMTP_PATH, doraise=True)
+except Exception as exc:
+    fail(LABEL, exc)
+
+ok(LABEL, "restored original smtp.py")
+ok("SHA256", backup_sha)
+'''
+
 
 class SmtpFixError(RuntimeError):
     pass
@@ -218,6 +355,11 @@ def print_check(label, ok, detail):
     print("[%s] %s: %s" % (status, label, detail))
 
 
+def validate_sender(sender):
+    if not sender or not re.match(r"^[^@\s<>\"']+@[^@\s<>\"']+\.[^@\s<>\"']+$", sender):
+        raise SmtpFixError("invalid envelope sender: %s" % sender)
+
+
 def extract_sha256(output):
     match = re.search(r"\b[0-9a-fA-F]{64}\b", output)
     if not match:
@@ -249,6 +391,35 @@ def run_remote_python(ssh, script, script_args):
     if result.stderr:
         print(result.stderr.rstrip(), file=sys.stderr)
     return result.returncode
+
+
+def remount(ssh, mount_target, mode):
+    command = "mount -o remount,%s %s" % (mode, q(mount_target))
+    ssh.run(command)
+    print_check("Remount", True, "%s %s" % (mount_target, mode))
+
+
+def ensure_backup(ssh, smtp_path, backup_path, expected_sha):
+    if remote_file_exists(ssh, backup_path):
+        backup_sha = remote_sha256(ssh, backup_path)
+        if backup_sha != expected_sha:
+            raise SmtpFixError("existing backup SHA256 mismatch: %s" % backup_sha)
+        print_check("Backup", True, "existing backup verified at %s" % backup_path)
+        return
+
+    ssh.run("cp -p %s %s" % (q(smtp_path), q(backup_path)))
+    backup_sha = remote_sha256(ssh, backup_path)
+    if backup_sha != expected_sha:
+        raise SmtpFixError("new backup SHA256 mismatch: %s" % backup_sha)
+    print_check("Backup", True, backup_path)
+
+
+def restore_from_backup(ssh, smtp_path, backup_path, expected_sha, label):
+    return run_remote_python(
+        ssh,
+        RESTORE_SCRIPT,
+        (smtp_path, backup_path, expected_sha, label),
+    )
 
 
 def remote_firmware_snapshot(ssh):
@@ -346,6 +517,83 @@ def test(args):
     )
 
 
+def install(args):
+    validate_sender(args.sender)
+    manifest = load_manifest()
+    smtp_path = args.smtp or manifest["smtp"]["path"]
+    backup_path = args.backup or (smtp_path + BACKUP_SUFFIX)
+    expected_sha = manifest["smtp"]["sha256"]
+    ssh = SSHClient(
+        args.host,
+        user=args.user,
+        port=args.port,
+        identity=args.identity,
+        ssh_options=args.ssh_option,
+    )
+
+    print("Installing SMTP envelope sender patch")
+    print("Envelope sender: %s" % args.sender)
+
+    preflight_sha = remote_sha256(ssh, smtp_path)
+    if preflight_sha != expected_sha:
+        print_check("Preflight SHA256", False, preflight_sha)
+        print("INSTALL FAILED")
+        return 1
+    print_check("Preflight SHA256", True, preflight_sha)
+
+    remounted_rw = False
+    backup_ready = False
+    install_ok = False
+    try:
+        remount(ssh, args.mount_target, "rw")
+        remounted_rw = True
+
+        ensure_backup(ssh, smtp_path, backup_path, expected_sha)
+        backup_ready = True
+
+        current_sha = remote_sha256(ssh, smtp_path)
+        if current_sha != expected_sha:
+            raise SmtpFixError("smtp.py changed before patch: %s" % current_sha)
+        print_check("Install SHA256", True, current_sha)
+
+        patch_rc = run_remote_python(
+            ssh,
+            PATCH_SCRIPT,
+            (smtp_path, args.sender, expected_sha),
+        )
+        if patch_rc != 0:
+            raise SmtpFixError("patch command failed")
+
+        install_ok = True
+    except Exception as exc:
+        print("ERROR: %s" % exc, file=sys.stderr)
+        if remounted_rw and backup_ready:
+            print("Rollback: restoring backup")
+            rollback_rc = restore_from_backup(
+                ssh,
+                smtp_path,
+                backup_path,
+                expected_sha,
+                "Rollback",
+            )
+            if rollback_rc != 0:
+                print("ROLLBACK FAILED", file=sys.stderr)
+        install_ok = False
+    finally:
+        if remounted_rw:
+            try:
+                remount(ssh, args.mount_target, "ro")
+            except Exception as exc:
+                print("ERROR: remount ro failed: %s" % exc, file=sys.stderr)
+                install_ok = False
+
+    if install_ok:
+        print("INSTALL OK")
+        return 0
+    print("INSTALL FAILED")
+    return 1
+
+
 def add_connection_arguments(parser):
     parser.add_argument("--host", required=True, help="NAS hostname or IP address")
     parser.add_argument("--user", default="root", help="SSH user, default: root")
@@ -380,6 +628,21 @@ def build_parser():
         help="SMTP socket timeout in seconds, default: 20",
     )
 
+    install_parser = subcommands.add_parser("install", help="Install SMTP envelope patch")
+    add_connection_arguments(install_parser)
+    install_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
+    install_parser.add_argument("--backup", help="Remote backup path")
+    install_parser.add_argument(
+        "--sender",
+        default=DEFAULT_SENDER,
+        help="Envelope sender address, default: %s" % DEFAULT_SENDER,
+    )
+    install_parser.add_argument(
+        "--mount-target",
+        default=DEFAULT_MOUNT_TARGET,
+        help="Filesystem to remount rw/ro, default: /",
+    )
+
     return parser
 
 
@@ -390,6 +653,8 @@ def main(argv=None):
         return verify(args)
     if args.command == "test":
         return test(args)
+    if args.command == "install":
+        return install(args)
     parser.print_help()
     return 1
 

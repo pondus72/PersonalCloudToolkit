@@ -25,6 +25,7 @@ Run commands from this repository:
 ```bash
 python smtpfix.py verify --host personalcloud.local --user root
 python smtpfix.py test --host personalcloud.local --user root
+python smtpfix.py install --host personalcloud.local --user root
 ```
 
 The command name shown by the CLI is `smtpfix`.
@@ -96,3 +97,56 @@ Expected output:
 ```
 
 The SMTP password is read on the NAS and is never printed.
+
+## install
+
+`install` patches only the SMTP envelope sender used by Seagate's sendmail
+package. SMTP authentication still uses the configured `auth_user`; the password
+is not changed.
+
+Default envelope sender:
+
+```text
+personalcloud@bildesiden.com
+```
+
+Install sequence:
+
+1. Preflight SHA256 check while the NAS is still read-only
+2. Remount `/` read-write
+3. Backup `smtp.py`
+4. Re-check SHA256
+5. Patch the `server.sendmail(sender_address, ...)` envelope argument
+6. Run `py_compile` on the patched file
+7. Remount `/` read-only
+
+If any step fails after the backup is ready, `install` automatically restores the
+original `smtp.py` from the verified backup and then remounts read-only.
+
+Example:
+
+```bash
+python smtpfix.py install --host 192.168.1.50 --user root
+```
+
+Expected output:
+
+```text
+Installing SMTP envelope sender patch
+Envelope sender: personalcloud@bildesiden.com
+[OK] Preflight SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
+[OK] Remount: / rw
+[OK] Backup: /usr/lib/python2.7/site-packages/sendmail/mailer/smtp.py.smtpfix-original
+[OK] Install SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
+[OK] SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
+[OK] Patch: envelope sender set to personalcloud@bildesiden.com
+[OK] Patched SHA256: ...
+[OK] Remount: / ro
+INSTALL OK
+```
+
+To use another envelope sender:
+
+```bash
+python smtpfix.py install --host 192.168.1.50 --user root --sender personalcloud@example.com
+```
