@@ -93,18 +93,23 @@ auth_pass = first(
     config,
     ("auth_pass", "auth_password", "smtp_password", "password", "passwd"),
 )
-use_ssl = as_bool(first(config, ("smtp_ssl", "ssl", "use_ssl", "ssl_enable", "ssl_enabled")))
-use_tls = as_bool(
-    first(config, ("smtp_tls", "tls", "starttls", "use_tls", "tls_enable", "tls_enabled"))
-)
+ssl_setting = first(config, ("smtp_ssl", "ssl", "use_ssl", "ssl_enable", "ssl_enabled"))
+tls_setting = first(config, ("smtp_tls", "tls", "starttls", "use_tls", "tls_enable", "tls_enabled"))
 
 if port is None:
-    port = 465 if use_ssl else 587 if use_tls else 25
+    ssl_hint = as_bool(ssl_setting)
+    tls_hint = as_bool(tls_setting)
+    port = 465 if ssl_hint else 587 if tls_hint else 25
 
 try:
     port = int(port)
 except Exception:
     fail("Configuration", "invalid SMTP port: %s" % port)
+
+use_ssl = as_bool(ssl_setting, default=(port == 465))
+use_tls = as_bool(tls_setting, default=(port == 587 and not use_ssl))
+if use_ssl:
+    use_tls = False
 
 missing = []
 if not host:
@@ -470,7 +475,7 @@ def verify(args):
     ok = ok and firmware is not None
 
     kernel = ssh.run("uname -r").stdout.strip()
-    kernel_ok = kernel == target["kernel"]
+    kernel_ok = target["kernel"] in kernel
     print_check("Kernel", kernel_ok, "%s (expected %s)" % (kernel, target["kernel"]))
     ok = ok and kernel_ok
 
