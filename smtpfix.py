@@ -16,9 +16,17 @@ BACKUP_SUFFIX = ".smtpfix-original"
 
 FIRMWARE_FILES = (
     "/etc/version",
+    "/etc/VERSION",
     "/etc/nas_version",
+    "/etc/nas-release",
+    "/etc/nasos-release",
     "/etc/NASVERSION",
+    "/etc/NAS_VERSION",
     "/etc/firmware_version",
+    "/etc/firmware",
+    "/etc/fw_version",
+    "/etc/product_version",
+    "/etc/product_info",
     "/etc/os-release",
 )
 
@@ -78,6 +86,13 @@ def fail(label, detail):
     raise SystemExit(1)
 
 
+def safe_keys(config):
+    names = sorted(str(key) for key in config.keys())
+    if len(names) > 30:
+        names = names[:30] + ["..."]
+    return ", ".join(names)
+
+
 try:
     with open(CONFIG_PATH, "r") as handle:
         raw_config = json.load(handle)
@@ -91,7 +106,22 @@ port = first(config, ("smtp_port", "port", "server_port", "mail_port"))
 auth_user = first(config, ("auth_user", "smtp_user", "username", "user", "login"))
 auth_pass = first(
     config,
-    ("auth_pass", "auth_password", "smtp_password", "password", "passwd"),
+    (
+        "auth_pass",
+        "auth_password",
+        "auth_passwd",
+        "auth_pwd",
+        "smtp_password",
+        "smtp_pass",
+        "smtp_passwd",
+        "smtp_pwd",
+        "mail_password",
+        "email_password",
+        "password",
+        "passwd",
+        "pwd",
+        "pass",
+    ),
 )
 ssl_setting = first(config, ("smtp_ssl", "ssl", "use_ssl", "ssl_enable", "ssl_enabled"))
 tls_setting = first(config, ("smtp_tls", "tls", "starttls", "use_tls", "tls_enable", "tls_enabled"))
@@ -119,7 +149,11 @@ if not auth_user:
 if not auth_pass:
     missing.append("auth password")
 if missing:
-    fail("Configuration", "missing %s in %s" % (", ".join(missing), CONFIG_PATH))
+    fail(
+        "Configuration",
+        "missing %s in %s; available keys: %s"
+        % (", ".join(missing), CONFIG_PATH, safe_keys(config)),
+    )
 
 ok(
     "Configuration",

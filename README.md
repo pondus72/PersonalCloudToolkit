@@ -67,6 +67,8 @@ VERIFY OK
 ```
 
 If the SHA256 does not match, the installer must not patch the file.
+The SHA256 check is the installer gate; firmware detection is a compatibility
+check for this target NAS.
 
 ## test
 
@@ -101,6 +103,8 @@ Expected output:
 ```
 
 The SMTP password is read on the NAS and is never printed.
+If required fields are missing, `test` prints available configuration key names
+only. It does not print configuration values.
 
 ## install
 
