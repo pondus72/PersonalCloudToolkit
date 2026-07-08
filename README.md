@@ -20,45 +20,47 @@ This project only fixes the Seagate sendmail SMTP envelope sender problem.
 
 It does not add SMART, Plex, UPS, backup, monitoring, or other NAS features.
 
-## Steg for steg for nybegynnere
+## Step-by-step guide for beginners
 
-Denne delen er den enkle bruksoppskriften. Eksemplene under bruker:
+This is the simple usage path. The examples use anonymized documentation values:
 
-- NAS IP: `192.168.1.109`
-- NAS-bruker: `personalcloud`
-- Envelope sender som skal settes inn: `personalcloud@bildesiden.com`
+- NAS IP address: `192.0.2.50`
+- NAS admin user: `nasadmin`
+- Envelope sender to apply: `nas-alerts@example.com`
+- SMTP login user shown in output: `smtp-user`
+- SMTP server shown in output: `smtp.example.com`
 
-Bytt IP, brukernavn eller senderadresse hvis din NAS bruker noe annet.
+Replace these values with the ones for your NAS and mail account.
 
-### 1. Åpne terminalen på PC-en
+### 1. Open a terminal on the computer
 
-På Windows: åpne PowerShell.
+On Windows, open PowerShell.
 
-Gå til mappen der repoet ligger:
+Go to the repository folder:
 
 ```powershell
 cd C:\path\to\PersonalCloudToolkit
 ```
 
-Hvis vanlig `python` virker på PC-en din, kan du bruke:
+If `python` works on your computer, run:
 
 ```powershell
 python smtpfix.py --help
 ```
 
-Hvis `python` ikke virker, bruk full sti til `python.exe`.
+If `python` is not on your `PATH`, use the full path to `python.exe`.
 
-### 2. Sjekk NAS-en før du endrer noe
+### 2. Check the NAS before changing anything
 
-Kjør:
+Run:
 
 ```powershell
-python smtpfix.py verify --host 192.168.1.109 --user personalcloud
+python smtpfix.py verify --host 192.0.2.50 --user nasadmin
 ```
 
-Du blir spurt om SSH-passordet til NAS-brukeren.
+You may be asked for the SSH password for the NAS user.
 
-Det viktigste er at disse er OK:
+The most important checks are:
 
 ```text
 [OK] SSH
@@ -69,119 +71,119 @@ Det viktigste er at disse er OK:
 [OK] SHA256
 ```
 
-Stopp hvis `SHA256` feiler. Da er `smtp.py` ikke den kjente originalfilen, og
-verktøyet skal ikke patche den.
+Stop if `SHA256` fails. That means `smtp.py` is not the known original file, and
+the tool must not patch it.
 
-Merk: `Firmware` kan feile hvis Seagate ikke har versjonen i en kjent fil.
-Patchen er likevel beskyttet av SHA256-sjekken.
+Note: `Firmware` can fail if the Seagate firmware version is not stored in a
+known file. The patch is still protected by the SHA256 check.
 
-### 3. Test SMTP uten å endre NAS-en
+### 3. Test SMTP without changing the NAS
 
-Kjør:
+Run:
 
 ```powershell
-python smtpfix.py test --host 192.168.1.109 --user personalcloud
+python smtpfix.py test --host 192.0.2.50 --user nasadmin
 ```
 
-Forventet vellykket resultat ser slik ut:
+A successful result looks like this:
 
 ```text
-[OK] Configuration: host=smtp.domeneshop.no port=465 auth_user=bildesiden1 ssl=True starttls=False
-[OK] DNS: smtp.domeneshop.no resolved to ...
+[OK] Configuration: host=smtp.example.com port=465 auth_user=smtp-user ssl=True starttls=False
+[OK] DNS: smtp.example.com resolved to ...
 [OK] SSL: SMTP_SSL connected
-[OK] SMTP login: bildesiden1
+[OK] SMTP login: smtp-user
 [OK] NOOP: 250 OK
 ```
 
-Denne testen sender ikke e-post. Den sjekker bare at NAS-en kan lese
-SMTP-oppsettet, koble til Domeneshop, logge inn og få svar.
+This test does not send email. It only checks that the NAS can read the SMTP
+configuration, connect to the SMTP provider, log in, and receive a response.
 
-Stopp hvis `SSL`, `SMTP login` eller `NOOP` feiler.
+Stop if `SSL`, `SMTP login`, or `NOOP` fails.
 
-### 4. Installer patchen
+### 4. Install the patch
 
-Hvis du logger inn som vanlig admin-bruker og må skrive sudo-passord, bruk
+If you log in as a normal NAS admin user and must type a sudo password, use
 `manual-install`:
 
 ```powershell
-python smtpfix.py manual-install --host 192.168.1.109 --user personalcloud
+python smtpfix.py manual-install --host 192.0.2.50 --user nasadmin --sender nas-alerts@example.com
 ```
 
-Du kan bli spurt om passord to ganger:
+You may be asked for two passwords:
 
-1. SSH-passordet til `personalcloud`
-2. Sudo-passordet når Seagate viser root-advarselen
+1. The SSH password for `nasadmin`
+2. The sudo password after the Seagate root warning appears
 
-Når alt er riktig, skal slutten se slik ut:
+When everything works, the end of the output should look like this:
 
 ```text
-[OK] Patch: envelope sender set to personalcloud@bildesiden.com
+[OK] Patch: envelope sender set to nas-alerts@example.com
 [OK] Remount: / ro
 INSTALL OK
 ```
 
-Ikke avbryt mens installasjonen kjører. Hvis noe feiler etter backup, prøver
-verktøyet automatisk å legge originalfilen tilbake.
+Do not interrupt the installation while it is running. If something fails after
+the backup is ready, the tool tries to restore the original file automatically.
 
-### 5. Test etter installasjon
+### 5. Test again after installation
 
-Kjør SMTP-testen en gang til:
+Run the SMTP test again:
 
 ```powershell
-python smtpfix.py test --host 192.168.1.109 --user personalcloud
+python smtpfix.py test --host 192.0.2.50 --user nasadmin
 ```
 
-Forventet resultat:
+Expected result:
 
 ```text
 [OK] SSL: SMTP_SSL connected
-[OK] SMTP login: bildesiden1
+[OK] SMTP login: smtp-user
 [OK] NOOP: 250 OK
 ```
 
-Dette bekrefter at SMTP fortsatt virker etter patchen.
+This confirms that SMTP still works after the patch.
 
-Ikke bruk `verify` som sluttkontroll etter installasjon. `verify` sjekker den
-originale SHA256-verdien, og den skal ikke lenger stemme når filen er patchet.
+Do not use `verify` as the final check after installation. `verify` checks the
+original SHA256 value, and that value is expected to change after patching.
 
-### 6. Hvis du vil angre
+### 6. Restore the original file if needed
 
-Kjør:
+Run:
 
 ```powershell
-python smtpfix.py manual-restore --host 192.168.1.109 --user personalcloud
+python smtpfix.py manual-restore --host 192.0.2.50 --user nasadmin
 ```
 
-Forventet slutt:
+Expected ending:
 
 ```text
 RESTORE OK
 ```
 
-Etter restore er original `smtp.py` tilbake fra backupen.
+After restore, the original `smtp.py` is back from the installer backup.
 
-### 7. Kort huskeliste
+### 7. Short checklist
 
-1. `verify` før installasjon
-2. `test` før installasjon
-3. `manual-install`
-4. `test` etter installasjon
-5. `manual-restore` bare hvis du vil angre
+1. Run `verify` before installation
+2. Run `test` before installation
+3. Run `manual-install`
+4. Run `test` after installation
+5. Run `manual-restore` only if you need to undo the patch
 
-NAS-en trenger ikke Git, Python 3 eller noen installasjon av dette prosjektet.
-Alt kjøres fra PC-en over SSH.
+The NAS does not need Git, Python 3, or a local installation of this project.
+Everything runs from the computer over SSH.
 
 ## Commands
 
 Run commands from this repository:
 
 ```bash
-./smtpfix verify --host personalcloud.local --user root
-./smtpfix test --host personalcloud.local --user root
-./smtpfix install --host personalcloud.local --user root
-./smtpfix manual-install --host personalcloud.local --user personalcloud
-./smtpfix manual-restore --host personalcloud.local --user personalcloud
-./smtpfix restore --host personalcloud.local --user root
+./smtpfix verify --host nas.example.net --user root
+./smtpfix test --host nas.example.net --user root
+./smtpfix install --host nas.example.net --user root --sender nas-alerts@example.com
+./smtpfix manual-install --host nas.example.net --user nasadmin --sender nas-alerts@example.com
+./smtpfix manual-restore --host nas.example.net --user nasadmin
+./smtpfix restore --host nas.example.net --user root
 ```
 
 On Windows, use `smtpfix.cmd` instead of `./smtpfix`.
@@ -207,13 +209,13 @@ It makes no changes on the NAS.
 Example:
 
 ```bash
-./smtpfix verify --host 192.168.1.50 --user root
+./smtpfix verify --host 192.0.2.50 --user root
 ```
 
 Expected output:
 
 ```text
-[OK] SSH: root@192.168.1.50
+[OK] SSH: root@192.0.2.50
 [OK] Firmware: 4.3.19.7
 [OK] Kernel: 3.10.72 (expected 3.10.72)
 [OK] Python: Python 2.7.14
@@ -247,16 +249,16 @@ On old NAS OpenSSL builds, `test` seeds the SSL PRNG before connecting.
 Example:
 
 ```bash
-./smtpfix test --host 192.168.1.50 --user root
+./smtpfix test --host 192.0.2.50 --user root
 ```
 
 Expected output:
 
 ```text
-[OK] Configuration: host=smtp.domeneshop.no port=587 auth_user=bildesiden1 ssl=False starttls=True
-[OK] DNS: smtp.domeneshop.no resolved to 2 address(es)
+[OK] Configuration: host=smtp.example.com port=587 auth_user=smtp-user ssl=False starttls=True
+[OK] DNS: smtp.example.com resolved to 2 address(es)
 [OK] SSL: STARTTLS negotiated
-[OK] SMTP login: bildesiden1
+[OK] SMTP login: smtp-user
 [OK] NOOP: 250 b'OK'
 ```
 
@@ -270,10 +272,10 @@ only. It does not print configuration values.
 package. SMTP authentication still uses the configured `auth_user`; the password
 is not changed.
 
-Default envelope sender:
+Example envelope sender:
 
 ```text
-personalcloud@bildesiden.com
+nas-alerts@example.com
 ```
 
 Install sequence:
@@ -292,26 +294,26 @@ original `smtp.py` from the verified backup and then remounts read-only.
 Example:
 
 ```bash
-./smtpfix install --host 192.168.1.50 --user root
+./smtpfix install --host 192.0.2.50 --user root --sender nas-alerts@example.com
 ```
 
 With an admin user that has passwordless sudo:
 
 ```bash
-./smtpfix install --host 192.168.1.50 --user personalcloud --sudo
+./smtpfix install --host 192.0.2.50 --user nasadmin --sudo --sender nas-alerts@example.com
 ```
 
 Expected output:
 
 ```text
 Installing SMTP envelope sender patch
-Envelope sender: personalcloud@bildesiden.com
+Envelope sender: nas-alerts@example.com
 [OK] Preflight SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
 [OK] Remount: / rw
 [OK] Backup: /usr/lib/python2.7/site-packages/sendmail/mailer/smtp.py.smtpfix-original
 [OK] Install SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
 [OK] SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
-[OK] Patch: envelope sender set to personalcloud@bildesiden.com
+[OK] Patch: envelope sender set to nas-alerts@example.com
 [OK] Patched SHA256: ...
 [OK] Remount: / ro
 INSTALL OK
@@ -320,7 +322,7 @@ INSTALL OK
 To use another envelope sender:
 
 ```bash
-./smtpfix install --host 192.168.1.50 --user root --sender personalcloud@example.com
+./smtpfix install --host 192.0.2.50 --user root --sender other-sender@example.com
 ```
 
 ## manual-install
@@ -347,13 +349,13 @@ remounts read-only.
 Example:
 
 ```bash
-./smtpfix manual-install --host 192.168.1.50 --user personalcloud
+./smtpfix manual-install --host 192.0.2.50 --user nasadmin --sender nas-alerts@example.com
 ```
 
 To inspect the root script without running it:
 
 ```bash
-./smtpfix manual-install --host 192.168.1.50 --user personalcloud --print-script
+./smtpfix manual-install --host 192.0.2.50 --user nasadmin --sender nas-alerts@example.com --print-script
 ```
 
 ## manual-restore
@@ -365,7 +367,7 @@ sudo is not available.
 Example:
 
 ```bash
-./smtpfix manual-restore --host 192.168.1.50 --user personalcloud
+./smtpfix manual-restore --host 192.0.2.50 --user nasadmin
 ```
 
 ## restore
@@ -384,7 +386,7 @@ Restore sequence:
 Example:
 
 ```bash
-./smtpfix restore --host 192.168.1.50 --user root
+./smtpfix restore --host 192.0.2.50 --user root
 ```
 
 Expected output:
