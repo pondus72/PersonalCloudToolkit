@@ -20,6 +20,157 @@ This project only fixes the Seagate sendmail SMTP envelope sender problem.
 
 It does not add SMART, Plex, UPS, backup, monitoring, or other NAS features.
 
+## Steg for steg for nybegynnere
+
+Denne delen er den enkle bruksoppskriften. Eksemplene under bruker:
+
+- NAS IP: `192.168.1.109`
+- NAS-bruker: `personalcloud`
+- Envelope sender som skal settes inn: `personalcloud@bildesiden.com`
+
+Bytt IP, brukernavn eller senderadresse hvis din NAS bruker noe annet.
+
+### 1. Åpne terminalen på PC-en
+
+På Windows: åpne PowerShell.
+
+Gå til mappen der repoet ligger:
+
+```powershell
+cd C:\path\to\PersonalCloudToolkit
+```
+
+Hvis vanlig `python` virker på PC-en din, kan du bruke:
+
+```powershell
+python smtpfix.py --help
+```
+
+Hvis `python` ikke virker, bruk full sti til `python.exe`.
+
+### 2. Sjekk NAS-en før du endrer noe
+
+Kjør:
+
+```powershell
+python smtpfix.py verify --host 192.168.1.109 --user personalcloud
+```
+
+Du blir spurt om SSH-passordet til NAS-brukeren.
+
+Det viktigste er at disse er OK:
+
+```text
+[OK] SSH
+[OK] Kernel
+[OK] Python
+[OK] OpenSSL
+[OK] smtp.py
+[OK] SHA256
+```
+
+Stopp hvis `SHA256` feiler. Da er `smtp.py` ikke den kjente originalfilen, og
+verktøyet skal ikke patche den.
+
+Merk: `Firmware` kan feile hvis Seagate ikke har versjonen i en kjent fil.
+Patchen er likevel beskyttet av SHA256-sjekken.
+
+### 3. Test SMTP uten å endre NAS-en
+
+Kjør:
+
+```powershell
+python smtpfix.py test --host 192.168.1.109 --user personalcloud
+```
+
+Forventet vellykket resultat ser slik ut:
+
+```text
+[OK] Configuration: host=smtp.domeneshop.no port=465 auth_user=bildesiden1 ssl=True starttls=False
+[OK] DNS: smtp.domeneshop.no resolved to ...
+[OK] SSL: SMTP_SSL connected
+[OK] SMTP login: bildesiden1
+[OK] NOOP: 250 OK
+```
+
+Denne testen sender ikke e-post. Den sjekker bare at NAS-en kan lese
+SMTP-oppsettet, koble til Domeneshop, logge inn og få svar.
+
+Stopp hvis `SSL`, `SMTP login` eller `NOOP` feiler.
+
+### 4. Installer patchen
+
+Hvis du logger inn som vanlig admin-bruker og må skrive sudo-passord, bruk
+`manual-install`:
+
+```powershell
+python smtpfix.py manual-install --host 192.168.1.109 --user personalcloud
+```
+
+Du kan bli spurt om passord to ganger:
+
+1. SSH-passordet til `personalcloud`
+2. Sudo-passordet når Seagate viser root-advarselen
+
+Når alt er riktig, skal slutten se slik ut:
+
+```text
+[OK] Patch: envelope sender set to personalcloud@bildesiden.com
+[OK] Remount: / ro
+INSTALL OK
+```
+
+Ikke avbryt mens installasjonen kjører. Hvis noe feiler etter backup, prøver
+verktøyet automatisk å legge originalfilen tilbake.
+
+### 5. Test etter installasjon
+
+Kjør SMTP-testen en gang til:
+
+```powershell
+python smtpfix.py test --host 192.168.1.109 --user personalcloud
+```
+
+Forventet resultat:
+
+```text
+[OK] SSL: SMTP_SSL connected
+[OK] SMTP login: bildesiden1
+[OK] NOOP: 250 OK
+```
+
+Dette bekrefter at SMTP fortsatt virker etter patchen.
+
+Ikke bruk `verify` som sluttkontroll etter installasjon. `verify` sjekker den
+originale SHA256-verdien, og den skal ikke lenger stemme når filen er patchet.
+
+### 6. Hvis du vil angre
+
+Kjør:
+
+```powershell
+python smtpfix.py manual-restore --host 192.168.1.109 --user personalcloud
+```
+
+Forventet slutt:
+
+```text
+RESTORE OK
+```
+
+Etter restore er original `smtp.py` tilbake fra backupen.
+
+### 7. Kort huskeliste
+
+1. `verify` før installasjon
+2. `test` før installasjon
+3. `manual-install`
+4. `test` etter installasjon
+5. `manual-restore` bare hvis du vil angre
+
+NAS-en trenger ikke Git, Python 3 eller noen installasjon av dette prosjektet.
+Alt kjøres fra PC-en over SSH.
+
 ## Commands
 
 Run commands from this repository:
