@@ -24,6 +24,7 @@ Run commands from this repository:
 
 ```bash
 python smtpfix.py verify --host personalcloud.local --user root
+python smtpfix.py test --host personalcloud.local --user root
 ```
 
 The command name shown by the CLI is `smtpfix`.
@@ -62,3 +63,36 @@ VERIFY OK
 ```
 
 If the SHA256 does not match, the installer must not patch the file.
+
+## test
+
+`test` connects to the NAS over SSH, reads `/etc/sendmail/user_config.json`, and
+tests the configured SMTP service from the NAS.
+
+It checks:
+
+- SMTP configuration can be read
+- DNS lookup
+- SSL or STARTTLS negotiation when configured
+- SMTP login using the configured `auth_user`
+- SMTP `NOOP`
+
+It makes no changes on the NAS and does not patch `smtp.py`.
+
+Example:
+
+```bash
+python smtpfix.py test --host 192.168.1.50 --user root
+```
+
+Expected output:
+
+```text
+[OK] Configuration: host=smtp.domeneshop.no port=587 auth_user=bildesiden1 ssl=False starttls=True
+[OK] DNS: smtp.domeneshop.no resolved to 2 address(es)
+[OK] SSL: STARTTLS negotiated
+[OK] SMTP login: bildesiden1
+[OK] NOOP: 250 b'OK'
+```
+
+The SMTP password is read on the NAS and is never printed.

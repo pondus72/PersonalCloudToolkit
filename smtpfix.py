@@ -9,6 +9,7 @@ from pathlib import Path
 
 MANIFEST = Path(__file__).with_name("manifest.json")
 DEFAULT_SMTP = "/usr/lib/python2.7/site-packages/sendmail/mailer/smtp.py"
+DEFAULT_CONFIG = "/etc/sendmail/user_config.json"
 
 FIRMWARE_FILES = (
     "/etc/version",
@@ -17,6 +18,150 @@ FIRMWARE_FILES = (
     "/etc/firmware_version",
     "/etc/os-release",
 )
+
+SMTP_TEST_SCRIPT = r'''
+from __future__ import print_function
+import json
+import smtplib
+import socket
+import sys
+
+CONFIG_PATH = sys.argv[1]
+TIMEOUT = int(sys.argv[2])
+
+
+def flatten_dict(value):
+    result = {}
+    if not isinstance(value, dict):
+        return result
+    for key, item in value.items():
+        key = str(key)
+        if isinstance(item, dict):
+            nested = flatten_dict(item)
+            for nested_key, nested_value in nested.items():
+                result.setdefault(nested_key, nested_value)
+                result.setdefault(key + "_" + nested_key, nested_value)
+        else:
+            result[key] = item
+    return result
+
+
+def first(config, keys, default=None):
+    for key in keys:
+        if key in config and config[key] not in (None, ""):
+            return config[key]
+    return default
+
+
+def as_bool(value, default=False):
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    text = str(value).strip().lower()
+    if text in ("1", "true", "yes", "on", "ssl", "tls", "starttls"):
+        return True
+    if text in ("0", "false", "no", "off", "none", "plain"):
+        return False
+    return default
+
+
+def ok(label, detail):
+    print("[OK] %s: %s" % (label, detail))
+
+
+def fail(label, detail):
+    print("[FAIL] %s: %s" % (label, detail))
+    raise SystemExit(1)
+
+
+try:
+    with open(CONFIG_PATH, "r") as handle:
+        raw_config = json.load(handle)
+except Exception as exc:
+    fail("Configuration", "could not read %s: %s" % (CONFIG_PATH, exc))
+
+config = flatten_dict(raw_config)
+
+host = first(config, ("smtp_host", "smtp_server", "server", "host", "mail_server"))
+port = first(config, ("smtp_port", "port", "server_port", "mail_port"))
+auth_user = first(config, ("auth_user", "smtp_user", "username", "user", "login"))
+auth_pass = first(
+    config,
+    ("auth_pass", "auth_password", "smtp_password", "password", "passwd"),
+)
+use_ssl = as_bool(first(config, ("smtp_ssl", "ssl", "use_ssl", "ssl_enable", "ssl_enabled")))
+use_tls = as_bool(
+    first(config, ("smtp_tls", "tls", "starttls", "use_tls", "tls_enable", "tls_enabled"))
+)
+
+if port is None:
+    port = 465 if use_ssl else 587 if use_tls else 25
+
+try:
+    port = int(port)
+except Exception:
+    fail("Configuration", "invalid SMTP port: %s" % port)
+
+missing = []
+if not host:
+    missing.append("SMTP host")
+if not auth_user:
+    missing.append("auth_user")
+if not auth_pass:
+    missing.append("auth password")
+if missing:
+    fail("Configuration", "missing %s in %s" % (", ".join(missing), CONFIG_PATH))
+
+ok(
+    "Configuration",
+    "host=%s port=%s auth_user=%s ssl=%s starttls=%s"
+    % (host, port, auth_user, use_ssl, use_tls),
+)
+
+try:
+    addresses = socket.getaddrinfo(host, port)
+except Exception as exc:
+    fail("DNS", exc)
+ok("DNS", "%s resolved to %s address(es)" % (host, len(addresses)))
+
+smtp = None
+try:
+    if use_ssl:
+        smtp = smtplib.SMTP_SSL(host, port, timeout=TIMEOUT)
+        smtp.ehlo()
+        ok("SSL", "SMTP_SSL connected")
+    else:
+        smtp = smtplib.SMTP(host, port, timeout=TIMEOUT)
+        smtp.ehlo()
+        if use_tls:
+            smtp.starttls()
+            smtp.ehlo()
+            ok("SSL", "STARTTLS negotiated")
+        else:
+            ok("SSL", "not configured by user_config.json")
+except Exception as exc:
+    fail("SSL", exc)
+
+try:
+    smtp.login(auth_user, auth_pass)
+except Exception as exc:
+    fail("SMTP login", exc)
+ok("SMTP login", auth_user)
+
+try:
+    code, message = smtp.noop()
+except Exception as exc:
+    fail("NOOP", exc)
+if int(code) != 250:
+    fail("NOOP", "%s %s" % (code, message))
+ok("NOOP", "%s %s" % (code, message))
+
+try:
+    smtp.quit()
+except Exception:
+    pass
+'''
 
 
 class SmtpFixError(RuntimeError):
@@ -94,6 +239,16 @@ def remote_sha256(ssh, path):
 def remote_file_exists(ssh, path):
     command = "test -f %s && test -r %s" % (q(path), q(path))
     return ssh.run(command, check=False).returncode == 0
+
+
+def run_remote_python(ssh, script, script_args):
+    command = "python - %s" % " ".join(q(value) for value in script_args)
+    result = ssh.run(command, input_text=script, check=False)
+    if result.stdout:
+        print(result.stdout.rstrip())
+    if result.stderr:
+        print(result.stderr.rstrip(), file=sys.stderr)
+    return result.returncode
 
 
 def remote_firmware_snapshot(ssh):
@@ -176,6 +331,21 @@ def verify(args):
     return 1
 
 
+def test(args):
+    ssh = SSHClient(
+        args.host,
+        user=args.user,
+        port=args.port,
+        identity=args.identity,
+        ssh_options=args.ssh_option,
+    )
+    return run_remote_python(
+        ssh,
+        SMTP_TEST_SCRIPT,
+        (args.config, str(args.timeout)),
+    )
+
+
 def add_connection_arguments(parser):
     parser.add_argument("--host", required=True, help="NAS hostname or IP address")
     parser.add_argument("--user", default="root", help="SSH user, default: root")
@@ -196,6 +366,20 @@ def build_parser():
     add_connection_arguments(verify_parser)
     verify_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
 
+    test_parser = subcommands.add_parser("test", help="Test SMTP settings from the NAS")
+    add_connection_arguments(test_parser)
+    test_parser.add_argument(
+        "--config",
+        default=DEFAULT_CONFIG,
+        help="Remote user_config.json path",
+    )
+    test_parser.add_argument(
+        "--timeout",
+        type=int,
+        default=20,
+        help="SMTP socket timeout in seconds, default: 20",
+    )
+
     return parser
 
 
@@ -204,6 +388,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.command == "verify":
         return verify(args)
+    if args.command == "test":
+        return test(args)
     parser.print_help()
     return 1
 
