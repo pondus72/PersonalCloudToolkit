@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 import re
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 MANIFEST = Path(__file__).with_name("manifest.json")
@@ -370,6 +372,124 @@ ok("SHA256", backup_sha)
 '''
 
 
+def build_manual_install_script(smtp_path, backup_path, sender, expected_sha, mount_target):
+    return """#!/bin/sh
+SMTP_PATH=%s
+BACKUP_PATH=%s
+EXPECTED_SHA=%s
+SENDER=%s
+MOUNT_TARGET=%s
+
+remounted_rw=0
+backup_ready=0
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        out=$(sha256sum "$1") || return 1
+        set -- $out
+        printf '%%s\\n' "$1"
+    else
+        out=$(openssl dgst -sha256 "$1") || return 1
+        printf '%%s\\n' "${out##* }"
+    fi
+}
+
+remount_ro() {
+    if [ "$remounted_rw" = "1" ]; then
+        if mount -o remount,ro "$MOUNT_TARGET"; then
+            echo "[OK] Remount: $MOUNT_TARGET ro"
+        else
+            echo "[FAIL] Remount: $MOUNT_TARGET ro" >&2
+            return 1
+        fi
+    fi
+}
+
+rollback() {
+    if [ "$backup_ready" = "1" ]; then
+        echo "Rollback: restoring backup"
+        python - "$SMTP_PATH" "$BACKUP_PATH" "$EXPECTED_SHA" Rollback <<'SMTPFIX_RESTORE_PY'
+%s
+SMTPFIX_RESTORE_PY
+    fi
+}
+
+fail() {
+    echo "ERROR: $*" >&2
+    rollback
+    remount_ro
+    echo "INSTALL FAILED"
+    exit 1
+}
+
+if [ "$(id -u)" != "0" ]; then
+    echo "ERROR: manual install script must run as root" >&2
+    echo "INSTALL FAILED"
+    exit 1
+fi
+
+echo "Installing SMTP envelope sender patch"
+echo "Envelope sender: $SENDER"
+
+actual=$(sha256_file "$SMTP_PATH") || fail "could not calculate preflight SHA256"
+if [ "$actual" != "$EXPECTED_SHA" ]; then
+    echo "[FAIL] Preflight SHA256: $actual"
+    echo "INSTALL FAILED"
+    exit 1
+fi
+echo "[OK] Preflight SHA256: $actual"
+
+mount -o remount,rw "$MOUNT_TARGET" || fail "could not remount $MOUNT_TARGET rw"
+remounted_rw=1
+echo "[OK] Remount: $MOUNT_TARGET rw"
+
+if [ -f "$BACKUP_PATH" ]; then
+    backup_sha=$(sha256_file "$BACKUP_PATH") || fail "could not calculate backup SHA256"
+    if [ "$backup_sha" != "$EXPECTED_SHA" ]; then
+        fail "existing backup SHA256 mismatch: $backup_sha"
+    fi
+    echo "[OK] Backup: existing backup verified at $BACKUP_PATH"
+else
+    cp -p "$SMTP_PATH" "$BACKUP_PATH" || fail "could not create backup"
+    backup_sha=$(sha256_file "$BACKUP_PATH") || fail "could not calculate backup SHA256"
+    if [ "$backup_sha" != "$EXPECTED_SHA" ]; then
+        fail "new backup SHA256 mismatch: $backup_sha"
+    fi
+    echo "[OK] Backup: $BACKUP_PATH"
+fi
+backup_ready=1
+
+current=$(sha256_file "$SMTP_PATH") || fail "could not calculate install SHA256"
+if [ "$current" != "$EXPECTED_SHA" ]; then
+    fail "smtp.py changed before patch: $current"
+fi
+echo "[OK] Install SHA256: $current"
+
+python - "$SMTP_PATH" "$SENDER" "$EXPECTED_SHA" <<'SMTPFIX_PATCH_PY'
+%s
+SMTPFIX_PATCH_PY
+patch_rc=$?
+if [ "$patch_rc" != "0" ]; then
+    fail "patch command failed"
+fi
+
+remount_ro || {
+    echo "INSTALL FAILED"
+    exit 1
+}
+remounted_rw=0
+echo "INSTALL OK"
+""" % (
+        q(smtp_path),
+        q(backup_path),
+        q(expected_sha),
+        q(sender),
+        q(mount_target),
+        RESTORE_SCRIPT.strip(),
+        PATCH_SCRIPT.strip(),
+    )
+
+
 class SmtpFixError(RuntimeError):
     pass
 
@@ -505,6 +625,36 @@ def restore_from_backup(ssh, smtp_path, backup_path, expected_sha, label):
     )
 
 
+def run_interactive_ssh_script(args, remote_command, script):
+    target = "%s@%s" % (args.user, args.host) if args.user else args.host
+    argv = ["ssh", "-tt", "-p", str(args.port)]
+    if args.identity:
+        argv.extend(["-i", args.identity])
+    for option in args.ssh_option or []:
+        argv.extend(["-o", option])
+    argv.extend([target, remote_command])
+
+    script_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            newline="\n",
+            delete=False,
+            suffix=".sh",
+        ) as handle:
+            script_path = handle.name
+            handle.write(script)
+        with open(script_path, "r", encoding="utf-8") as handle:
+            return subprocess.call(argv, stdin=handle)
+    finally:
+        if script_path:
+            try:
+                os.unlink(script_path)
+            except OSError:
+                pass
+
+
 def remote_firmware_snapshot(ssh):
     files = " ".join(q(path) for path in FIRMWARE_FILES)
     command = (
@@ -600,6 +750,30 @@ def test(args):
         SMTP_TEST_SCRIPT,
         (args.config, str(args.timeout)),
     )
+
+
+def manual_install(args):
+    validate_sender(args.sender)
+    manifest = load_manifest()
+    smtp_path = args.smtp or manifest["smtp"]["path"]
+    backup_path = args.backup or (smtp_path + BACKUP_SUFFIX)
+    expected_sha = manifest["smtp"]["sha256"]
+    script = build_manual_install_script(
+        smtp_path,
+        backup_path,
+        args.sender,
+        expected_sha,
+        args.mount_target,
+    )
+
+    if args.print_script:
+        print(script)
+        return 0
+
+    print("Starting one-session manual install over SSH.")
+    print("You may be asked for the SSH password and then the sudo password.")
+    print("Remote root command: %s" % args.root_command)
+    return run_interactive_ssh_script(args, args.root_command, script)
 
 
 def install(args):
@@ -734,7 +908,7 @@ def restore(args):
     return 1
 
 
-def add_connection_arguments(parser):
+def add_connection_arguments(parser, include_sudo=True):
     parser.add_argument("--host", required=True, help="NAS hostname or IP address")
     parser.add_argument("--user", default="root", help="SSH user, default: root")
     parser.add_argument("--port", type=int, default=22, help="SSH port, default: 22")
@@ -744,11 +918,12 @@ def add_connection_arguments(parser):
         action="append",
         help="Extra ssh -o option, can be used more than once",
     )
-    parser.add_argument(
-        "--sudo",
-        action="store_true",
-        help="Run remote commands with passwordless sudo -n",
-    )
+    if include_sudo:
+        parser.add_argument(
+            "--sudo",
+            action="store_true",
+            help="Run remote commands with passwordless sudo -n",
+        )
 
 
 def build_parser():
@@ -771,6 +946,34 @@ def build_parser():
         type=int,
         default=20,
         help="SMTP socket timeout in seconds, default: 20",
+    )
+
+    manual_install_parser = subcommands.add_parser(
+        "manual-install",
+        help="Install patch through one interactive SSH sudo session",
+    )
+    add_connection_arguments(manual_install_parser, include_sudo=False)
+    manual_install_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
+    manual_install_parser.add_argument("--backup", help="Remote backup path")
+    manual_install_parser.add_argument(
+        "--sender",
+        default=DEFAULT_SENDER,
+        help="Envelope sender address, default: %s" % DEFAULT_SENDER,
+    )
+    manual_install_parser.add_argument(
+        "--mount-target",
+        default=DEFAULT_MOUNT_TARGET,
+        help="Filesystem to remount rw/ro, default: /",
+    )
+    manual_install_parser.add_argument(
+        "--root-command",
+        default="sudo sh -s",
+        help="Remote command that runs stdin as root, default: sudo sh -s",
+    )
+    manual_install_parser.add_argument(
+        "--print-script",
+        action="store_true",
+        help="Print the root install script instead of running it",
     )
 
     install_parser = subcommands.add_parser("install", help="Install SMTP envelope patch")
@@ -808,6 +1011,8 @@ def main(argv=None):
         return verify(args)
     if args.command == "test":
         return test(args)
+    if args.command == "manual-install":
+        return manual_install(args)
     if args.command == "install":
         return install(args)
     if args.command == "restore":

@@ -28,6 +28,7 @@ Run commands from this repository:
 ./smtpfix verify --host personalcloud.local --user root
 ./smtpfix test --host personalcloud.local --user root
 ./smtpfix install --host personalcloud.local --user root
+./smtpfix manual-install --host personalcloud.local --user personalcloud
 ./smtpfix restore --host personalcloud.local --user root
 ```
 
@@ -168,6 +169,38 @@ To use another envelope sender:
 
 ```bash
 ./smtpfix install --host 192.168.1.50 --user root --sender personalcloud@example.com
+```
+
+## manual-install
+
+`manual-install` is for NAS setups where the admin user can run `sudo`, but SSH
+root login or passwordless sudo is not available.
+
+It opens one interactive SSH session with `ssh -tt`, runs `sudo sh -s`, and sends
+one root install script over stdin. You enter the SSH password and sudo password
+in your terminal. The root script uses the same guarded install flow:
+
+1. Preflight SHA256 check
+2. Remount `/` read-write
+3. Backup `smtp.py`
+4. Re-check SHA256
+5. Patch the envelope sender
+6. Run `py_compile`
+7. Remount `/` read-only
+
+If patching fails after backup, the root script restores the verified backup and
+remounts read-only.
+
+Example:
+
+```bash
+./smtpfix manual-install --host 192.168.1.50 --user personalcloud
+```
+
+To inspect the root script without running it:
+
+```bash
+./smtpfix manual-install --host 192.168.1.50 --user personalcloud --print-script
 ```
 
 ## restore
