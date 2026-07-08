@@ -843,6 +843,10 @@ def verify(args):
         actual_sha = remote_sha256(ssh, smtp_path)
         sha_ok = actual_sha == expected_sha
         print_check("SHA256", sha_ok, actual_sha)
+        if not sha_ok:
+            print("NOTE: smtp.py is not the original file expected by verify.")
+            print("NOTE: If the patch is already installed, run 'smtpfix test' as the post-installation check.")
+            print("NOTE: Restore the original file before running verify as a clean pre-installation check.")
         ok = ok and sha_ok
 
     if ok:

@@ -239,6 +239,16 @@ check for this target NAS.
 
 Run `verify` before installing the patch, or after restoring the original file.
 After installation, `verify` is expected to fail the original SHA256 check.
+In that case, the tool explains that `test` is the correct post-installation
+check:
+
+```text
+[FAIL] SHA256: patched-file-sha256
+NOTE: smtp.py is not the original file expected by verify.
+NOTE: If the patch is already installed, run 'smtpfix test' as the post-installation check.
+NOTE: Restore the original file before running verify as a clean pre-installation check.
+VERIFY FAILED
+```
 
 ## test
 
