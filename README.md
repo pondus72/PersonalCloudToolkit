@@ -31,6 +31,9 @@ This is the simple usage path. The examples use anonymized documentation values:
 - SMTP server shown in output: `smtp.example.com`
 
 Replace these values with the ones for your NAS and mail account.
+Do not copy the example values literally unless they match your setup. For
+example, `nasadmin` means "your actual NAS admin username". If SSH rejects that
+user, rerun the command with the username that can log in to your NAS.
 
 ### 1. Open a terminal on the computer
 
@@ -71,8 +74,13 @@ The most important checks are:
 [OK] SHA256
 ```
 
-Stop if `SHA256` fails. That means `smtp.py` is not the known original file, and
-the tool must not patch it.
+Stop if `SHA256` fails before installation. That means `smtp.py` is not the
+known original file, and the tool must not patch it.
+
+If you already installed the patch, a `SHA256` failure is expected because
+`smtp.py` is no longer the original file. In that case, use `test` as the
+post-installation check. Restore the original file first if you want `verify` to
+pass again.
 
 Note: `Firmware` can fail if the Seagate firmware version is not stored in a
 known file. The patch is still protected by the SHA256 check.
@@ -228,6 +236,9 @@ VERIFY OK
 If the SHA256 does not match, the installer must not patch the file.
 The SHA256 check is the installer gate; firmware detection is a compatibility
 check for this target NAS.
+
+Run `verify` before installing the patch, or after restoring the original file.
+After installation, `verify` is expected to fail the original SHA256 check.
 
 ## test
 
