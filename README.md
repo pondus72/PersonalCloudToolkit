@@ -29,6 +29,7 @@ Run commands from this repository:
 ./smtpfix test --host personalcloud.local --user root
 ./smtpfix install --host personalcloud.local --user root
 ./smtpfix manual-install --host personalcloud.local --user personalcloud
+./smtpfix manual-restore --host personalcloud.local --user personalcloud
 ./smtpfix restore --host personalcloud.local --user root
 ```
 
@@ -202,6 +203,18 @@ To inspect the root script without running it:
 
 ```bash
 ./smtpfix manual-install --host 192.168.1.50 --user personalcloud --print-script
+```
+
+## manual-restore
+
+`manual-restore` restores the original `smtp.py` through the same interactive
+SSH/sudo flow as `manual-install`. Use it when SSH root login or passwordless
+sudo is not available.
+
+Example:
+
+```bash
+./smtpfix manual-restore --host 192.168.1.50 --user personalcloud
 ```
 
 ## restore

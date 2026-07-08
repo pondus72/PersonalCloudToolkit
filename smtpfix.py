@@ -490,6 +490,93 @@ echo "INSTALL OK"
     )
 
 
+def build_manual_restore_script(smtp_path, backup_path, expected_sha, mount_target):
+    return """#!/bin/sh
+SMTP_PATH=%s
+BACKUP_PATH=%s
+EXPECTED_SHA=%s
+MOUNT_TARGET=%s
+
+remounted_rw=0
+
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        out=$(sha256sum "$1") || return 1
+        set -- $out
+        printf '%%s\\n' "$1"
+    else
+        out=$(openssl dgst -sha256 "$1") || return 1
+        printf '%%s\\n' "${out##* }"
+    fi
+}
+
+remount_ro() {
+    if [ "$remounted_rw" = "1" ]; then
+        if mount -o remount,ro "$MOUNT_TARGET"; then
+            echo "[OK] Remount: $MOUNT_TARGET ro"
+        else
+            echo "[FAIL] Remount: $MOUNT_TARGET ro" >&2
+            return 1
+        fi
+    fi
+}
+
+fail() {
+    echo "ERROR: $*" >&2
+    remount_ro
+    echo "RESTORE FAILED"
+    exit 1
+}
+
+if [ "$(id -u)" != "0" ]; then
+    echo "ERROR: manual restore script must run as root" >&2
+    echo "RESTORE FAILED"
+    exit 1
+fi
+
+echo "Restoring original smtp.py"
+
+backup_sha=$(sha256_file "$BACKUP_PATH") || fail "could not calculate backup SHA256"
+if [ "$backup_sha" != "$EXPECTED_SHA" ]; then
+    echo "[FAIL] Backup SHA256: $backup_sha"
+    echo "RESTORE FAILED"
+    exit 1
+fi
+echo "[OK] Backup SHA256: $backup_sha"
+
+mount -o remount,rw "$MOUNT_TARGET" || fail "could not remount $MOUNT_TARGET rw"
+remounted_rw=1
+echo "[OK] Remount: $MOUNT_TARGET rw"
+
+python - "$SMTP_PATH" "$BACKUP_PATH" "$EXPECTED_SHA" Restore <<'SMTPFIX_RESTORE_PY'
+%s
+SMTPFIX_RESTORE_PY
+restore_rc=$?
+if [ "$restore_rc" != "0" ]; then
+    fail "restore command failed"
+fi
+
+final_sha=$(sha256_file "$SMTP_PATH") || fail "could not calculate restored SHA256"
+if [ "$final_sha" != "$EXPECTED_SHA" ]; then
+    fail "restored smtp.py SHA256 mismatch: $final_sha"
+fi
+echo "[OK] Restored SHA256: $final_sha"
+
+remount_ro || {
+    echo "RESTORE FAILED"
+    exit 1
+}
+remounted_rw=0
+echo "RESTORE OK"
+""" % (
+        q(smtp_path),
+        q(backup_path),
+        q(expected_sha),
+        q(mount_target),
+        RESTORE_SCRIPT.strip(),
+    )
+
+
 class SmtpFixError(RuntimeError):
     pass
 
@@ -806,6 +893,29 @@ def manual_install(args):
     return run_manual_install_session(args, script)
 
 
+def manual_restore(args):
+    manifest = load_manifest()
+    smtp_path = args.smtp or manifest["smtp"]["path"]
+    backup_path = args.backup or (smtp_path + BACKUP_SUFFIX)
+    expected_sha = manifest["smtp"]["sha256"]
+    script = build_manual_restore_script(
+        smtp_path,
+        backup_path,
+        expected_sha,
+        args.mount_target,
+    )
+
+    if args.print_script:
+        print(script)
+        return 0
+
+    print("Starting one-session manual restore over SSH.")
+    print("The root script will be uploaded temporarily, run with sudo, and removed.")
+    print("You may be asked for the SSH password and then the sudo password.")
+    print("Remote root command: %s" % args.root_command)
+    return run_manual_install_session(args, script)
+
+
 def install(args):
     validate_sender(args.sender)
     manifest = load_manifest()
@@ -1011,6 +1121,34 @@ def build_parser():
         help="Print the root install script instead of running it",
     )
 
+    manual_restore_parser = subcommands.add_parser(
+        "manual-restore",
+        help="Restore original smtp.py through one interactive SSH sudo session",
+    )
+    add_connection_arguments(manual_restore_parser, include_sudo=False)
+    manual_restore_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
+    manual_restore_parser.add_argument("--backup", help="Remote backup path")
+    manual_restore_parser.add_argument(
+        "--mount-target",
+        default=DEFAULT_MOUNT_TARGET,
+        help="Filesystem to remount rw/ro, default: /",
+    )
+    manual_restore_parser.add_argument(
+        "--root-command",
+        default="sudo sh",
+        help="Remote command that runs the uploaded script as root, default: sudo sh",
+    )
+    manual_restore_parser.add_argument(
+        "--remote-script",
+        default=".smtpfix-manual-restore.sh",
+        help="Temporary script name under the SSH user's home directory",
+    )
+    manual_restore_parser.add_argument(
+        "--print-script",
+        action="store_true",
+        help="Print the root restore script instead of running it",
+    )
+
     install_parser = subcommands.add_parser("install", help="Install SMTP envelope patch")
     add_connection_arguments(install_parser)
     install_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
@@ -1048,6 +1186,8 @@ def main(argv=None):
         return test(args)
     if args.command == "manual-install":
         return manual_install(args)
+    if args.command == "manual-restore":
+        return manual_restore(args)
     if args.command == "install":
         return install(args)
     if args.command == "restore":
