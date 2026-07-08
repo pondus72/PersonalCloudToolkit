@@ -1,0 +1,8 @@
+{
+  "toolkit_version": "3.0.0-alpha1",
+  "supported_firmware": ["4.3.19.7"],
+  "smtp": {
+    "path": "/usr/lib/python2.7/site-packages/sendmail/mailer/smtp.py",
+    "sha256": "14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c"
+  }
+}
