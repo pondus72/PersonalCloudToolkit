@@ -1,5 +1,5 @@
 {
-  "toolkit_version": "3.0.0-alpha1",
+  "toolkit_version": "3.0.0",
   "target": {
     "firmware": ["4.3.19.7"],
     "kernel": "3.10.72",

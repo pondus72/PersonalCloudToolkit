@@ -2,6 +2,8 @@
 
 SMTP fix toolkit for Seagate Personal Cloud.
 
+Version: 3.0.0
+
 Target:
 
 - Firmware: 4.3.19.7
