@@ -26,6 +26,7 @@ Run commands from this repository:
 python smtpfix.py verify --host personalcloud.local --user root
 python smtpfix.py test --host personalcloud.local --user root
 python smtpfix.py install --host personalcloud.local --user root
+python smtpfix.py restore --host personalcloud.local --user root
 ```
 
 The command name shown by the CLI is `smtpfix`.
@@ -149,4 +150,35 @@ To use another envelope sender:
 
 ```bash
 python smtpfix.py install --host 192.168.1.50 --user root --sender personalcloud@example.com
+```
+
+## restore
+
+`restore` puts the original `smtp.py` back from the installer backup.
+
+Restore sequence:
+
+1. Remount `/` read-write
+2. Verify the backup SHA256
+3. Restore original `smtp.py` atomically
+4. Run `py_compile`
+5. Verify restored SHA256
+6. Remount `/` read-only
+
+Example:
+
+```bash
+python smtpfix.py restore --host 192.168.1.50 --user root
+```
+
+Expected output:
+
+```text
+Restoring original smtp.py
+[OK] Remount: / rw
+[OK] Restore: restored original smtp.py
+[OK] SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
+[OK] Restored SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
+[OK] Remount: / ro
+RESTORE OK
 ```

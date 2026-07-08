@@ -594,6 +594,59 @@ def install(args):
     return 1
 
 
+def restore(args):
+    manifest = load_manifest()
+    smtp_path = args.smtp or manifest["smtp"]["path"]
+    backup_path = args.backup or (smtp_path + BACKUP_SUFFIX)
+    expected_sha = manifest["smtp"]["sha256"]
+    ssh = SSHClient(
+        args.host,
+        user=args.user,
+        port=args.port,
+        identity=args.identity,
+        ssh_options=args.ssh_option,
+    )
+
+    print("Restoring original smtp.py")
+    remounted_rw = False
+    restore_ok = False
+    try:
+        remount(ssh, args.mount_target, "rw")
+        remounted_rw = True
+
+        restore_rc = restore_from_backup(
+            ssh,
+            smtp_path,
+            backup_path,
+            expected_sha,
+            "Restore",
+        )
+        if restore_rc != 0:
+            raise SmtpFixError("restore command failed")
+
+        final_sha = remote_sha256(ssh, smtp_path)
+        if final_sha != expected_sha:
+            raise SmtpFixError("restored smtp.py SHA256 mismatch: %s" % final_sha)
+        print_check("Restored SHA256", True, final_sha)
+        restore_ok = True
+    except Exception as exc:
+        print("ERROR: %s" % exc, file=sys.stderr)
+        restore_ok = False
+    finally:
+        if remounted_rw:
+            try:
+                remount(ssh, args.mount_target, "ro")
+            except Exception as exc:
+                print("ERROR: remount ro failed: %s" % exc, file=sys.stderr)
+                restore_ok = False
+
+    if restore_ok:
+        print("RESTORE OK")
+        return 0
+    print("RESTORE FAILED")
+    return 1
+
+
 def add_connection_arguments(parser):
     parser.add_argument("--host", required=True, help="NAS hostname or IP address")
     parser.add_argument("--user", default="root", help="SSH user, default: root")
@@ -643,6 +696,16 @@ def build_parser():
         help="Filesystem to remount rw/ro, default: /",
     )
 
+    restore_parser = subcommands.add_parser("restore", help="Restore original smtp.py")
+    add_connection_arguments(restore_parser)
+    restore_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
+    restore_parser.add_argument("--backup", help="Remote backup path")
+    restore_parser.add_argument(
+        "--mount-target",
+        default=DEFAULT_MOUNT_TARGET,
+        help="Filesystem to remount rw/ro, default: /",
+    )
+
     return parser
 
 
@@ -655,6 +718,8 @@ def main(argv=None):
         return test(args)
     if args.command == "install":
         return install(args)
+    if args.command == "restore":
+        return restore(args)
     parser.print_help()
     return 1
 
