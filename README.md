@@ -391,6 +391,23 @@ Example:
 ./smtpfix manual-restore --host 192.0.2.50 --user nasadmin
 ```
 
+Expected output:
+
+```text
+Starting one-session manual restore over SSH.
+The root script will be uploaded temporarily, run with sudo, and removed.
+You may be asked for the SSH password and then the sudo password.
+Remote root command: sudo sh
+Restoring original smtp.py
+[OK] Backup SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
+[OK] Remount: / rw
+[OK] Restore: restored original smtp.py
+[OK] SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
+[OK] Restored SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
+[OK] Remount: / ro
+RESTORE OK
+```
+
 ## restore
 
 `restore` puts the original `smtp.py` back from the installer backup.
