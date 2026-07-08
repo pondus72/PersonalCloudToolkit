@@ -23,13 +23,13 @@ It does not add SMART, Plex, UPS, backup, monitoring, or other NAS features.
 Run commands from this repository:
 
 ```bash
-python smtpfix.py verify --host personalcloud.local --user root
-python smtpfix.py test --host personalcloud.local --user root
-python smtpfix.py install --host personalcloud.local --user root
-python smtpfix.py restore --host personalcloud.local --user root
+./smtpfix verify --host personalcloud.local --user root
+./smtpfix test --host personalcloud.local --user root
+./smtpfix install --host personalcloud.local --user root
+./smtpfix restore --host personalcloud.local --user root
 ```
 
-The command name shown by the CLI is `smtpfix`.
+On Windows, use `smtpfix.cmd` instead of `./smtpfix`.
 
 ## verify
 
@@ -48,7 +48,7 @@ It makes no changes on the NAS.
 Example:
 
 ```bash
-python smtpfix.py verify --host 192.168.1.50 --user root
+./smtpfix verify --host 192.168.1.50 --user root
 ```
 
 Expected output:
@@ -84,7 +84,7 @@ It makes no changes on the NAS and does not patch `smtp.py`.
 Example:
 
 ```bash
-python smtpfix.py test --host 192.168.1.50 --user root
+./smtpfix test --host 192.168.1.50 --user root
 ```
 
 Expected output:
@@ -127,7 +127,7 @@ original `smtp.py` from the verified backup and then remounts read-only.
 Example:
 
 ```bash
-python smtpfix.py install --host 192.168.1.50 --user root
+./smtpfix install --host 192.168.1.50 --user root
 ```
 
 Expected output:
@@ -149,7 +149,7 @@ INSTALL OK
 To use another envelope sender:
 
 ```bash
-python smtpfix.py install --host 192.168.1.50 --user root --sender personalcloud@example.com
+./smtpfix install --host 192.168.1.50 --user root --sender personalcloud@example.com
 ```
 
 ## restore
@@ -168,7 +168,7 @@ Restore sequence:
 Example:
 
 ```bash
-python smtpfix.py restore --host 192.168.1.50 --user root
+./smtpfix restore --host 192.168.1.50 --user root
 ```
 
 Expected output:
