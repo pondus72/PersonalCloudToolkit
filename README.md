@@ -1,9 +1,64 @@
-# PersonalCloud Toolkit
+# PersonalCloudToolkit
 
-Toolkit for maintaining Seagate Personal Cloud (NAS OS 4.3.19.7).
+SMTP fix toolkit for Seagate Personal Cloud.
 
-## Status
+Target:
 
-Project initialized.
+- Firmware: 4.3.19.7
+- Kernel: 3.10.72
+- NAS Python: 2.7.14
+- NAS OpenSSL: 1.0.2k
 
-Current milestone: Foundation (v3.0.0-alpha1)
+The toolkit runs on Windows, Linux, or macOS and talks to the NAS only over SSH.
+It is not installed on the NAS.
+
+## Scope
+
+This project only fixes the Seagate sendmail SMTP envelope sender problem.
+
+It does not add SMART, Plex, UPS, backup, monitoring, or other NAS features.
+
+## Commands
+
+Run commands from this repository:
+
+```bash
+python smtpfix.py verify --host personalcloud.local --user root
+```
+
+The command name shown by the CLI is `smtpfix`.
+
+## verify
+
+`verify` connects to the NAS over SSH and checks:
+
+- SSH connection
+- Firmware
+- Kernel
+- Python version
+- OpenSSL version
+- `/usr/lib/python2.7/site-packages/sendmail/mailer/smtp.py`
+- Original `smtp.py` SHA256
+
+It makes no changes on the NAS.
+
+Example:
+
+```bash
+python smtpfix.py verify --host 192.168.1.50 --user root
+```
+
+Expected output:
+
+```text
+[OK] SSH: root@192.168.1.50
+[OK] Firmware: 4.3.19.7
+[OK] Kernel: 3.10.72 (expected 3.10.72)
+[OK] Python: Python 2.7.14
+[OK] OpenSSL: OpenSSL 1.0.2k ...
+[OK] smtp.py: /usr/lib/python2.7/site-packages/sendmail/mailer/smtp.py
+[OK] SHA256: 14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c
+VERIFY OK
+```
+
+If the SHA256 does not match, the installer must not patch the file.

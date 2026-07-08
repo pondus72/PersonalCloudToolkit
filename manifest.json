@@ -1,5 +1,11 @@
 {
   "toolkit_version": "3.0.0-alpha1",
+  "target": {
+    "firmware": ["4.3.19.7"],
+    "kernel": "3.10.72",
+    "python": "2.7.14",
+    "openssl": "1.0.2k"
+  },
   "supported_firmware": ["4.3.19.7"],
   "smtp": {
     "path": "/usr/lib/python2.7/site-packages/sendmail/mailer/smtp.py",
