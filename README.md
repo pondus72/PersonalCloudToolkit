@@ -346,6 +346,31 @@ To use another envelope sender:
 ./smtpfix install --host 192.0.2.50 --user root --sender other-sender@example.com
 ```
 
+## Changing the envelope sender later
+
+`install` and `manual-install` only patch the known original `smtp.py` file. If
+the NAS is already patched and you want to change the envelope sender, restore
+the original file first and then install again with the new `--sender` value.
+
+Interactive admin-user flow:
+
+```bash
+./smtpfix manual-restore --host 192.0.2.50 --user nasadmin
+./smtpfix manual-install --host 192.0.2.50 --user nasadmin --sender other-sender@example.com
+./smtpfix test --host 192.0.2.50 --user nasadmin
+```
+
+Root-user flow:
+
+```bash
+./smtpfix restore --host 192.0.2.50 --user root
+./smtpfix install --host 192.0.2.50 --user root --sender other-sender@example.com
+./smtpfix test --host 192.0.2.50 --user root
+```
+
+`--print-script` only prints the generated root script. It does not connect to
+the NAS and does not change anything.
+
 ## manual-install
 
 `manual-install` is for NAS setups where the admin user can run `sudo`, but SSH
@@ -378,6 +403,8 @@ To inspect the root script without running it:
 ```bash
 ./smtpfix manual-install --host 192.0.2.50 --user nasadmin --sender nas-alerts@example.com --print-script
 ```
+
+This prints the script only. It does not install the patch.
 
 ## manual-restore
 
