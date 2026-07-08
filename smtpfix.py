@@ -33,9 +33,12 @@ FIRMWARE_FILES = (
 SMTP_TEST_SCRIPT = r'''
 from __future__ import print_function
 import json
+import os
 import smtplib
 import socket
+import ssl
 import sys
+import time
 
 CONFIG_PATH = sys.argv[1]
 TIMEOUT = int(sys.argv[2])
@@ -84,6 +87,32 @@ def ok(label, detail):
 def fail(label, detail):
     print("[FAIL] %s: %s" % (label, detail))
     raise SystemExit(1)
+
+
+def seed_ssl_prng():
+    rand_add = getattr(ssl, "RAND_add", None)
+    if rand_add is None:
+        return
+    seed_parts = []
+    try:
+        seed_parts.append(os.urandom(1024))
+    except Exception:
+        pass
+    seed_text = "%s:%s:%s:%s" % (
+        time.time(),
+        os.getpid(),
+        socket.gethostname(),
+        CONFIG_PATH,
+    )
+    try:
+        seed_parts.append(seed_text.encode("utf-8"))
+    except AttributeError:
+        seed_parts.append(seed_text)
+    for seed in seed_parts:
+        rand_add(seed, float(len(seed)))
+    rand_status = getattr(ssl, "RAND_status", None)
+    if rand_status is not None and not rand_status():
+        fail("SSL", "OpenSSL PRNG not seeded")
 
 
 def safe_keys(config):
@@ -169,6 +198,7 @@ ok("DNS", "%s resolved to %s address(es)" % (host, len(addresses)))
 
 smtp = None
 try:
+    seed_ssl_prng()
     if use_ssl:
         smtp = smtplib.SMTP_SSL(host, port, timeout=TIMEOUT)
         smtp.ehlo()

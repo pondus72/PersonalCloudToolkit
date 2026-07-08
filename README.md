@@ -89,6 +89,7 @@ It checks:
 
 It makes no changes on the NAS and does not patch `smtp.py`.
 If SSL/TLS flags are missing, port 465 implies SSL and port 587 implies STARTTLS.
+On old NAS OpenSSL builds, `test` seeds the SSL PRNG before connecting.
 
 Example:
 
