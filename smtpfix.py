@@ -354,8 +354,17 @@ class CommandError(SmtpFixError):
 
 
 class SSHClient:
-    def __init__(self, host, user=None, port=22, identity=None, ssh_options=None):
+    def __init__(
+        self,
+        host,
+        user=None,
+        port=22,
+        identity=None,
+        ssh_options=None,
+        sudo=False,
+    ):
         self.target = "%s@%s" % (user, host) if user else host
+        self.sudo = sudo
         self.base_command = ["ssh", "-p", str(port)]
         if identity:
             self.base_command.extend(["-i", identity])
@@ -365,7 +374,7 @@ class SSHClient:
 
     def run(self, command, input_text=None, check=True):
         argv = list(self.base_command)
-        argv.append(command)
+        argv.append(self.wrap_command(command))
         try:
             result = subprocess.run(
                 argv,
@@ -379,6 +388,11 @@ class SSHClient:
         if check and result.returncode != 0:
             raise CommandError(command, result.returncode, result.stdout, result.stderr)
         return result
+
+    def wrap_command(self, command):
+        if not self.sudo:
+            return command
+        return "sudo -n sh -c %s" % q(command)
 
 
 def load_manifest():
@@ -491,6 +505,7 @@ def verify(args):
         port=args.port,
         identity=args.identity,
         ssh_options=args.ssh_option,
+        sudo=args.sudo,
     )
 
     ok = True
@@ -548,6 +563,7 @@ def test(args):
         port=args.port,
         identity=args.identity,
         ssh_options=args.ssh_option,
+        sudo=args.sudo,
     )
     return run_remote_python(
         ssh,
@@ -568,6 +584,7 @@ def install(args):
         port=args.port,
         identity=args.identity,
         ssh_options=args.ssh_option,
+        sudo=args.sudo,
     )
 
     print("Installing SMTP envelope sender patch")
@@ -644,6 +661,7 @@ def restore(args):
         port=args.port,
         identity=args.identity,
         ssh_options=args.ssh_option,
+        sudo=args.sudo,
     )
 
     print("Restoring original smtp.py")
@@ -695,6 +713,11 @@ def add_connection_arguments(parser):
         "--ssh-option",
         action="append",
         help="Extra ssh -o option, can be used more than once",
+    )
+    parser.add_argument(
+        "--sudo",
+        action="store_true",
+        help="Run remote commands with passwordless sudo -n",
     )
 
 

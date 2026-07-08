@@ -33,6 +33,10 @@ Run commands from this repository:
 
 On Windows, use `smtpfix.cmd` instead of `./smtpfix`.
 
+If the SSH user is an admin user with passwordless sudo, add `--sudo`.
+The tool uses `sudo -n` and fails without making changes if sudo asks for a
+password.
+
 ## verify
 
 `verify` connects to the NAS over SSH and checks:
@@ -135,6 +139,12 @@ Example:
 
 ```bash
 ./smtpfix install --host 192.168.1.50 --user root
+```
+
+With an admin user that has passwordless sudo:
+
+```bash
+./smtpfix install --host 192.168.1.50 --user personalcloud --sudo
 ```
 
 Expected output:
