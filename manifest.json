@@ -1,5 +1,5 @@
 {
-  "toolkit_version": "3.0.0",
+  "toolkit_version": "3.1.0",
   "target": {
     "firmware": ["4.3.19.7"],
     "kernel": "3.10.72",
@@ -10,5 +10,30 @@
   "smtp": {
     "path": "/usr/lib/python2.7/site-packages/sendmail/mailer/smtp.py",
     "sha256": "14552f6daadda90eca5b0605dffc7a25c229dfe307c5e5a735d32d4d9e66e95c"
-  }
+  },
+  "sendmail": {
+    "user_config": "/etc/sendmail/user_config.json"
+  },
+  "install": {
+    "backup_suffix": ".smtpfix-original",
+    "mount_target": "/",
+    "root_command": "sudo sh",
+    "manual_install_script": ".smtpfix-manual-install.sh",
+    "manual_restore_script": ".smtpfix-manual-restore.sh"
+  },
+  "firmware_files": [
+    "/etc/version",
+    "/etc/VERSION",
+    "/etc/nas_version",
+    "/etc/nas-release",
+    "/etc/nasos-release",
+    "/etc/NASVERSION",
+    "/etc/NAS_VERSION",
+    "/etc/firmware_version",
+    "/etc/firmware",
+    "/etc/fw_version",
+    "/etc/product_version",
+    "/etc/product_info",
+    "/etc/os-release"
+  ]
 }

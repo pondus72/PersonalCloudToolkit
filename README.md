@@ -2,7 +2,7 @@
 
 SMTP fix toolkit for Seagate Personal Cloud.
 
-Version: 3.0.0
+Version: 3.1.0
 
 Target:
 
@@ -19,6 +19,18 @@ It is not installed on the NAS.
 This project only fixes the Seagate sendmail SMTP envelope sender problem.
 
 It does not add SMART, Plex, UPS, backup, monitoring, or other NAS features.
+
+## Runtime values
+
+The tool has no built-in NAS account, host, or envelope sender. You must provide
+the connection values on the command line.
+
+For install commands, `--sender` is required. This prevents the tool from
+silently installing a private or stale email address.
+
+Target-specific Seagate paths, hashes, and remount defaults live in
+`manifest.json`. They can still be overridden with command-line options such as
+`--smtp`, `--backup`, `--config`, and `--mount-target`.
 
 ## Step-by-step guide for beginners
 
@@ -117,6 +129,9 @@ If you log in as a normal NAS admin user and must type a sudo password, use
 python smtpfix.py manual-install --host 192.0.2.50 --user nasadmin --sender nas-alerts@example.com
 ```
 
+`--sender` is required. Use the email address that should appear as the SMTP
+envelope sender and `Return-Path`.
+
 You may be asked for two passwords:
 
 1. The SSH password for `nasadmin`
@@ -195,6 +210,9 @@ Run commands from this repository:
 ```
 
 On Windows, use `smtpfix.cmd` instead of `./smtpfix`.
+
+`--host` and `--user` are required for all commands. `--sender` is required for
+`install` and `manual-install`.
 
 If the SSH user is an admin user with passwordless sudo, add `--sudo`.
 The tool uses `sudo -n` and fails without making changes if sudo asks for a
@@ -292,6 +310,8 @@ only. It does not print configuration values.
 `install` patches only the SMTP envelope sender used by Seagate's sendmail
 package. SMTP authentication still uses the configured `auth_user`; the password
 is not changed.
+
+`--sender` is required. There is no built-in default envelope sender.
 
 Example envelope sender:
 

@@ -10,27 +10,6 @@ import tempfile
 from pathlib import Path
 
 MANIFEST = Path(__file__).with_name("manifest.json")
-DEFAULT_SMTP = "/usr/lib/python2.7/site-packages/sendmail/mailer/smtp.py"
-DEFAULT_CONFIG = "/etc/sendmail/user_config.json"
-DEFAULT_SENDER = "personalcloud@bildesiden.com"
-DEFAULT_MOUNT_TARGET = "/"
-BACKUP_SUFFIX = ".smtpfix-original"
-
-FIRMWARE_FILES = (
-    "/etc/version",
-    "/etc/VERSION",
-    "/etc/nas_version",
-    "/etc/nas-release",
-    "/etc/nasos-release",
-    "/etc/NASVERSION",
-    "/etc/NAS_VERSION",
-    "/etc/firmware_version",
-    "/etc/firmware",
-    "/etc/fw_version",
-    "/etc/product_version",
-    "/etc/product_info",
-    "/etc/os-release",
-)
 
 SMTP_TEST_SCRIPT = r'''
 from __future__ import print_function
@@ -636,6 +615,26 @@ def load_manifest():
     return json.loads(MANIFEST.read_text(encoding="utf-8"))
 
 
+def smtp_path_from(manifest, override=None):
+    return override or manifest["smtp"]["path"]
+
+
+def config_path_from(manifest, override=None):
+    return override or manifest["sendmail"]["user_config"]
+
+
+def install_setting(manifest, key):
+    return manifest["install"][key]
+
+
+def backup_path_from(manifest, smtp_path, override=None):
+    return override or (smtp_path + install_setting(manifest, "backup_suffix"))
+
+
+def mount_target_from(manifest, override=None):
+    return override or install_setting(manifest, "mount_target")
+
+
 def q(value):
     return shlex.quote(value)
 
@@ -771,8 +770,8 @@ def run_manual_install_session(args, script):
                 pass
 
 
-def remote_firmware_snapshot(ssh):
-    files = " ".join(q(path) for path in FIRMWARE_FILES)
+def remote_firmware_snapshot(ssh, firmware_files):
+    files = " ".join(q(path) for path in firmware_files)
     command = (
         "for p in %s; do "
         "if [ -r \"$p\" ]; then "
@@ -810,7 +809,7 @@ def verify(args):
     print_check("SSH", connected, ssh.target)
     ok = ok and connected
 
-    firmware_text = remote_firmware_snapshot(ssh)
+    firmware_text = remote_firmware_snapshot(ssh, manifest["firmware_files"])
     firmware = first_supported_value(firmware_text, target["firmware"])
     print_check(
         "Firmware",
@@ -834,7 +833,7 @@ def verify(args):
     print_check("OpenSSL", openssl_ok, openssl_version)
     ok = ok and openssl_ok
 
-    smtp_path = args.smtp or smtp["path"]
+    smtp_path = smtp_path_from(manifest, args.smtp)
     exists = remote_file_exists(ssh, smtp_path)
     print_check("smtp.py", exists, smtp_path)
     ok = ok and exists
@@ -857,6 +856,7 @@ def verify(args):
 
 
 def test(args):
+    manifest = load_manifest()
     ssh = SSHClient(
         args.host,
         user=args.user,
@@ -868,22 +868,22 @@ def test(args):
     return run_remote_python(
         ssh,
         SMTP_TEST_SCRIPT,
-        (args.config, str(args.timeout)),
+        (config_path_from(manifest, args.config), str(args.timeout)),
     )
 
 
 def manual_install(args):
     validate_sender(args.sender)
     manifest = load_manifest()
-    smtp_path = args.smtp or manifest["smtp"]["path"]
-    backup_path = args.backup or (smtp_path + BACKUP_SUFFIX)
+    smtp_path = smtp_path_from(manifest, args.smtp)
+    backup_path = backup_path_from(manifest, smtp_path, args.backup)
     expected_sha = manifest["smtp"]["sha256"]
     script = build_manual_install_script(
         smtp_path,
         backup_path,
         args.sender,
         expected_sha,
-        args.mount_target,
+        mount_target_from(manifest, args.mount_target),
     )
 
     if args.print_script:
@@ -899,14 +899,14 @@ def manual_install(args):
 
 def manual_restore(args):
     manifest = load_manifest()
-    smtp_path = args.smtp or manifest["smtp"]["path"]
-    backup_path = args.backup or (smtp_path + BACKUP_SUFFIX)
+    smtp_path = smtp_path_from(manifest, args.smtp)
+    backup_path = backup_path_from(manifest, smtp_path, args.backup)
     expected_sha = manifest["smtp"]["sha256"]
     script = build_manual_restore_script(
         smtp_path,
         backup_path,
         expected_sha,
-        args.mount_target,
+        mount_target_from(manifest, args.mount_target),
     )
 
     if args.print_script:
@@ -923,8 +923,8 @@ def manual_restore(args):
 def install(args):
     validate_sender(args.sender)
     manifest = load_manifest()
-    smtp_path = args.smtp or manifest["smtp"]["path"]
-    backup_path = args.backup or (smtp_path + BACKUP_SUFFIX)
+    smtp_path = smtp_path_from(manifest, args.smtp)
+    backup_path = backup_path_from(manifest, smtp_path, args.backup)
     expected_sha = manifest["smtp"]["sha256"]
     ssh = SSHClient(
         args.host,
@@ -949,7 +949,8 @@ def install(args):
     backup_ready = False
     install_ok = False
     try:
-        remount(ssh, args.mount_target, "rw")
+        mount_target = mount_target_from(manifest, args.mount_target)
+        remount(ssh, mount_target, "rw")
         remounted_rw = True
 
         ensure_backup(ssh, smtp_path, backup_path, expected_sha)
@@ -986,7 +987,7 @@ def install(args):
     finally:
         if remounted_rw:
             try:
-                remount(ssh, args.mount_target, "ro")
+                remount(ssh, mount_target, "ro")
             except Exception as exc:
                 print("ERROR: remount ro failed: %s" % exc, file=sys.stderr)
                 install_ok = False
@@ -1000,8 +1001,8 @@ def install(args):
 
 def restore(args):
     manifest = load_manifest()
-    smtp_path = args.smtp or manifest["smtp"]["path"]
-    backup_path = args.backup or (smtp_path + BACKUP_SUFFIX)
+    smtp_path = smtp_path_from(manifest, args.smtp)
+    backup_path = backup_path_from(manifest, smtp_path, args.backup)
     expected_sha = manifest["smtp"]["sha256"]
     ssh = SSHClient(
         args.host,
@@ -1016,7 +1017,8 @@ def restore(args):
     remounted_rw = False
     restore_ok = False
     try:
-        remount(ssh, args.mount_target, "rw")
+        mount_target = mount_target_from(manifest, args.mount_target)
+        remount(ssh, mount_target, "rw")
         remounted_rw = True
 
         restore_rc = restore_from_backup(
@@ -1040,7 +1042,7 @@ def restore(args):
     finally:
         if remounted_rw:
             try:
-                remount(ssh, args.mount_target, "ro")
+                remount(ssh, mount_target, "ro")
             except Exception as exc:
                 print("ERROR: remount ro failed: %s" % exc, file=sys.stderr)
                 restore_ok = False
@@ -1054,7 +1056,7 @@ def restore(args):
 
 def add_connection_arguments(parser, include_sudo=True):
     parser.add_argument("--host", required=True, help="NAS hostname or IP address")
-    parser.add_argument("--user", default="root", help="SSH user, default: root")
+    parser.add_argument("--user", required=True, help="SSH user")
     parser.add_argument("--port", type=int, default=22, help="SSH port, default: 22")
     parser.add_argument("--identity", help="SSH private key file")
     parser.add_argument(
@@ -1071,19 +1073,23 @@ def add_connection_arguments(parser, include_sudo=True):
 
 
 def build_parser():
+    manifest = load_manifest()
+    install_defaults = manifest["install"]
     parser = argparse.ArgumentParser(prog="smtpfix")
     subcommands = parser.add_subparsers(dest="command")
 
     verify_parser = subcommands.add_parser("verify", help="Verify NAS firmware and smtp.py")
     add_connection_arguments(verify_parser)
-    verify_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
+    verify_parser.add_argument(
+        "--smtp",
+        help="Remote smtp.py path, default: manifest smtp.path",
+    )
 
     test_parser = subcommands.add_parser("test", help="Test SMTP settings from the NAS")
     add_connection_arguments(test_parser)
     test_parser.add_argument(
         "--config",
-        default=DEFAULT_CONFIG,
-        help="Remote user_config.json path",
+        help="Remote user_config.json path, default: manifest sendmail.user_config",
     )
     test_parser.add_argument(
         "--timeout",
@@ -1097,27 +1103,29 @@ def build_parser():
         help="Install patch through one interactive SSH sudo session",
     )
     add_connection_arguments(manual_install_parser, include_sudo=False)
-    manual_install_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
+    manual_install_parser.add_argument(
+        "--smtp",
+        help="Remote smtp.py path, default: manifest smtp.path",
+    )
     manual_install_parser.add_argument("--backup", help="Remote backup path")
     manual_install_parser.add_argument(
         "--sender",
-        default=DEFAULT_SENDER,
-        help="Envelope sender address, default: %s" % DEFAULT_SENDER,
+        required=True,
+        help="Envelope sender address to use for SMTP MAIL FROM",
     )
     manual_install_parser.add_argument(
         "--mount-target",
-        default=DEFAULT_MOUNT_TARGET,
-        help="Filesystem to remount rw/ro, default: /",
+        help="Filesystem to remount rw/ro, default: manifest install.mount_target",
     )
     manual_install_parser.add_argument(
         "--root-command",
-        default="sudo sh",
-        help="Remote command that runs the uploaded script as root, default: sudo sh",
+        default=install_defaults["root_command"],
+        help="Remote command that runs the uploaded script as root, default: manifest install.root_command",
     )
     manual_install_parser.add_argument(
         "--remote-script",
-        default=".smtpfix-manual-install.sh",
-        help="Temporary script name under the SSH user's home directory",
+        default=install_defaults["manual_install_script"],
+        help="Temporary script name under the SSH user's home directory, default: manifest install.manual_install_script",
     )
     manual_install_parser.add_argument(
         "--print-script",
@@ -1130,22 +1138,24 @@ def build_parser():
         help="Restore original smtp.py through one interactive SSH sudo session",
     )
     add_connection_arguments(manual_restore_parser, include_sudo=False)
-    manual_restore_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
+    manual_restore_parser.add_argument(
+        "--smtp",
+        help="Remote smtp.py path, default: manifest smtp.path",
+    )
     manual_restore_parser.add_argument("--backup", help="Remote backup path")
     manual_restore_parser.add_argument(
         "--mount-target",
-        default=DEFAULT_MOUNT_TARGET,
-        help="Filesystem to remount rw/ro, default: /",
+        help="Filesystem to remount rw/ro, default: manifest install.mount_target",
     )
     manual_restore_parser.add_argument(
         "--root-command",
-        default="sudo sh",
-        help="Remote command that runs the uploaded script as root, default: sudo sh",
+        default=install_defaults["root_command"],
+        help="Remote command that runs the uploaded script as root, default: manifest install.root_command",
     )
     manual_restore_parser.add_argument(
         "--remote-script",
-        default=".smtpfix-manual-restore.sh",
-        help="Temporary script name under the SSH user's home directory",
+        default=install_defaults["manual_restore_script"],
+        help="Temporary script name under the SSH user's home directory, default: manifest install.manual_restore_script",
     )
     manual_restore_parser.add_argument(
         "--print-script",
@@ -1155,27 +1165,31 @@ def build_parser():
 
     install_parser = subcommands.add_parser("install", help="Install SMTP envelope patch")
     add_connection_arguments(install_parser)
-    install_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
+    install_parser.add_argument(
+        "--smtp",
+        help="Remote smtp.py path, default: manifest smtp.path",
+    )
     install_parser.add_argument("--backup", help="Remote backup path")
     install_parser.add_argument(
         "--sender",
-        default=DEFAULT_SENDER,
-        help="Envelope sender address, default: %s" % DEFAULT_SENDER,
+        required=True,
+        help="Envelope sender address to use for SMTP MAIL FROM",
     )
     install_parser.add_argument(
         "--mount-target",
-        default=DEFAULT_MOUNT_TARGET,
-        help="Filesystem to remount rw/ro, default: /",
+        help="Filesystem to remount rw/ro, default: manifest install.mount_target",
     )
 
     restore_parser = subcommands.add_parser("restore", help="Restore original smtp.py")
     add_connection_arguments(restore_parser)
-    restore_parser.add_argument("--smtp", default=DEFAULT_SMTP, help="Remote smtp.py path")
+    restore_parser.add_argument(
+        "--smtp",
+        help="Remote smtp.py path, default: manifest smtp.path",
+    )
     restore_parser.add_argument("--backup", help="Remote backup path")
     restore_parser.add_argument(
         "--mount-target",
-        default=DEFAULT_MOUNT_TARGET,
-        help="Filesystem to remount rw/ro, default: /",
+        help="Filesystem to remount rw/ro, default: manifest install.mount_target",
     )
 
     return parser
